@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  api:
+    image: brain-api
+    build:
+      context: ./brain-api
+  
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+      - queue
+
+  watcher:
+    image: brain-watcher
+
+    build:
+      context: ./brain-watcher # Diz ao Docker para olhar na pasta 'brain-watcher'
+
+    restart: unless-stopped
+    volumes:
+      - /home/nisio:/home/nisio:ro
+      - /home/nisio/.config/brain/scan.paths:/home/nisio/.config/brain/scan.paths:ro
+    depends_on:
+      - api
+
+  db:
+    image: chromadb/chroma
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
+  queue:
+    image: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  chroma_data:

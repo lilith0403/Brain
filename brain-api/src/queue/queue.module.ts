@@ -7,8 +7,6 @@ import { QueueConsumer } from './queue.consumer';
 
 @Module({
   imports: [
-    // Conecta ao Redis e registra uma fila chamada "ingest-queue"
-    // Permite configuração flexível: no Docker usa 'queue', localmente usa 'localhost'
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',
@@ -18,10 +16,9 @@ import { QueueConsumer } from './queue.consumer';
     BullModule.registerQueue({
       name: 'ingest-queue',
     }),
-    AiModule, // <-- Precisamos do AiService
+    AiModule, 
   ],
   controllers: [QueueController],
-  // Adicione o Service e o Consumer
   providers: [QueueService, QueueConsumer], 
 })
 export class QueueModule {}

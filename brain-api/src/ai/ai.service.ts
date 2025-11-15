@@ -13,6 +13,10 @@ import { StringOutputParser } from '@langchain/core/output_parsers';
 import { RunnableSequence } from '@langchain/core/runnables';
 import { Document } from '@langchain/core/documents';
 import { CohereRerank } from '@langchain/cohere';
+import { AgentExecutor, createReactAgent } from '@langchain/classic/agents';
+import { z } from 'zod';
+import { DynamicTool } from '@langchain/core/tools';
+import { pull } from 'langchain/hub'
 
 function formatDocumentsAsString(documents: Document[]): string {
   return documents.map((doc) => doc.pageContent).join('\n\n');
@@ -25,6 +29,7 @@ export class AiService implements OnModuleInit {
   private embeddings: GoogleGenerativeAIEmbeddings;
   private vectorStore: Chroma;
   private model: ChatGoogleGenerativeAI;
+  private agentExecutor: AgentExecutor;
 
   constructor(private configService: ConfigService) {}
 
@@ -67,9 +72,63 @@ export class AiService implements OnModuleInit {
       url: chromaUrl,
       collectionName: 'brain-collection',
     });
-  
-  console.log('AiService inicializado com sucesso!');
-}
+
+    const tools = [this.createSearchTool()];
+
+    const prompt = await pull<PromptTemplate>('hwchase17/react');
+
+    const agent = await createReactAgent({
+      llm: this.model,
+      tools: tools,
+      prompt,
+    });
+
+    this.agentExecutor = new AgentExecutor({
+      agent,
+      tools: tools,
+      verbose: true,
+    });
+
+    console.log('AiService (com Agente ReAct) inicializado com sucesso!');
+  }
+
+  private createSearchTool(): DynamicTool {
+    const retriever = this.vectorStore.asRetriever(300);
+    const reranker = new CohereRerank({
+      apiKey: this.configService.get<string>('COHERE_API_KEY'),
+      model: 'rerank-multilingual-v3.0',
+      topN: 3,
+    });
+
+    return new DynamicTool({
+      name: 'search_files',
+      description: `Busca nos arquivos pessoais do usuário (código, configs, notas) para encontrar contexto. 
+                    Use isso para responder perguntas sobre as configurações do usuário, o que é um
+                    certo arquivo, ou para encontrar definições de funções/classes.`,
+      func: async (query: string) => {
+        try {
+          console.log(`[Tool: search_files] Buscando por: "${query}"`);
+          const initialDocs = await retriever.invoke(query);
+          if (initialDocs.length === 0) {
+            return 'Nenhum documento encontrado.';
+          }
+
+          const rerankedDocs = await reranker.compressDocuments(
+            initialDocs,
+            query,
+          );
+          if (rerankedDocs.length === 0) {
+            return 'Nenhum documento relevante encontrado após re-ranking.';
+          }
+
+          return formatDocumentsAsString(rerankedDocs);
+        } catch (error) {
+          console.error('[Tool: search_files] Erro:', error);
+          return 'Erro ao tentar buscar nos arquivos.';
+        }
+      },
+    });
+  }
 
   /**
    * 
@@ -264,72 +323,59 @@ export class AiService implements OnModuleInit {
   }
   async ask(askDto: AskDto) {
     const { query } = askDto;
-    console.log(`Iniciando RAG para a query: ${query}`);
-
+    console.log(`[Agente] Recebida a query: ${askDto.query}`);
     try {
-      console.log('RAG: 1. Buscando chunks (k=10)...');
-      const retriever = this.vectorStore.asRetriever(300);
-      const initialDocs = await retriever.invoke(query);
-
-      console.log(`RAG: 2. Re-classificando ${initialDocs.length} chunks...`);
-      const reranker = new CohereRerank({
-        apiKey: this.configService.get<string>('COHERE_API_KEY'),
-        model: 'rerank-multilingual-v3.0',
-        topN: 3,
-      });
-
-      const rerankedDocs = await reranker.compressDocuments(
-        initialDocs,
-        query,
-      );
-
-      if (rerankedDocs.length === 0) {
-        console.warn('RAG: 3. Nenhum documento relevante encontrado após re-classificação.');
+      const result = await this.agentExecutor.invoke({ input: query });
+      console.log(`[Agente] Resposta: ${result.output}`);
+      return {
+        status: 'ok',
+        answer: result.output,
+      };
+    } catch (error: any) {
+      const errorMessage = error?.message || '';
+      let extractedAnswer: string | null = null;
+      
+      if (errorMessage.includes('Parsing LLM output produced both a final answer')) {
+        const finalAnswerMatch = errorMessage.match(/Final Answer:\s*([\s\S]+?)(?:\n\nTroubleshooting URL:|$)/i);
+        
+        if (finalAnswerMatch && finalAnswerMatch[1]) {
+          let answer = finalAnswerMatch[1].trim();
+          answer = answer.replace(/\n{3,}/g, '\n\n').trim();
+          extractedAnswer = answer;
+          console.log(`[Agente] Extraída resposta final do erro (LLM retornou ação + resposta)`);
+        }
+      }
+      
+      if (!extractedAnswer && errorMessage.includes('Could not parse LLM output:')) {
+        const parseErrorMatch = errorMessage.match(/Could not parse LLM output:\s*([\s\S]+?)(?:\n\nTroubleshooting URL:|$)/i);
+        
+        if (parseErrorMatch && parseErrorMatch[1]) {
+          let answer = parseErrorMatch[1].trim();
+          
+          answer = answer.replace(/\n\nTroubleshooting URL:.*$/i, '').trim();
+          
+          answer = answer.replace(/^Error: Could not parse LLM output:\s*/i, '').trim();
+          
+          if (answer && 
+              !answer.includes('Action:') && 
+              !answer.includes('Thought:') &&
+              answer.length > 50 &&
+              /(?:para|você|seu|arquivo|editar|mudar|cor|texto|waybar|css|style|localize|encontre|adicione|modifique|salve|reinicie|experimente|pode|precisa|deve|geralmente|normalmente|exemplo|passos|resumo|abordagem)/i.test(answer)) {
+            extractedAnswer = answer;
+            console.log(`[Agente] Extraída resposta direta do erro (LLM não seguiu formato ReAct)`);
+          }
+        }
+      }
+      
+      if (extractedAnswer) {
         return {
           status: 'ok',
-          answer: 'Eu não encontrei essa informação nos seus arquivos.',
+          answer: extractedAnswer,
         };
       }
-
-      console.log(`RAG: 3. Chunks re-classificados e podados para ${rerankedDocs.length}.`);
-
-      const context = formatDocumentsAsString(rerankedDocs);
-
-      const promptTemplate = PromptTemplate.fromTemplate(
-        `Você é um assistente de IA focado em responder perguntas sobre os arquivos pessoais de um usuário (dotfiles, código-fonte, notas).
-        Responda a pergunta do usuário APENAS com base no contexto fornecido.
-        Se a informação não estiver no contexto, diga EXATAMENTE: "Eu não encontrei essa informação nos seus arquivos."
-
-        Contexto:
-        {context}
-        
-        Pergunta:
-        {question}
-        
-        Resposta:`,
-      );
-
-      const answerChain = RunnableSequence.from([
-        promptTemplate,
-        this.model,
-        new StringOutputParser(),
-      ]);
-
-      const answer = await answerChain.invoke({
-        question: askDto.query,
-        context: context,
-      });
-
-      console.log(`Resposta do RAG: ${answer}`);
-
-      return { status: 'ok', answer: answer };
-
-    } catch (error) {
-      console.error('Erro durante o RAG:', error);
-      return {
-        status: 'error',
-        message: 'Falha ao processar a pergunta.',
-      };
+      
+      console.error('Erro durante o RAG do Agente (não foi possível extrair resposta válida):', error);
+      return { status: 'error', answer: 'Ocorreu um erro ao processar sua pergunta.' };
     }
   }
 }

@@ -1,46 +1,86 @@
 version: '3.8'
 
 services:
+  # 1. O Cérebro (API NestJS)
+  # NOTA: Para desenvolvimento local, você pode comentar este serviço
+  # e rodar a API localmente com: cd brain-api && npm run start:dev
   api:
     image: brain-api
     build:
       context: ./brain-api
-  
     restart: unless-stopped
     env_file:
-      - .env
+      - .env # Carrega a GOOGLE_API_KEY
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
+    environment:
+      # Sobrescreve as vars do .env da API (localhost)
+      REDIS_HOST: queue
+      CHROMA_HOST: db
+      # Permite que a API local se conecte usando estas variáveis
+      REDIS_PORT: 6379
+      CHROMA_PORT: 8000
     depends_on:
       - db
       - queue
+    # Para desenvolvimento local: comente o serviço 'api' acima ou use:
+    # docker compose up -d db queue watcher
+    # Então rode a API localmente com: cd brain-api && npm run start:dev
 
+  # 2. O Ouvido (Watcher Go)
   watcher:
     image: brain-watcher
-
     build:
-      context: ./brain-watcher # Diz ao Docker para olhar na pasta 'brain-watcher'
-
+      context: ./brain-watcher
     restart: unless-stopped
+    environment:
+      # URL da API: se rodando no Docker, usa 'api'; se local, usa host.docker.internal
+      # Esta variável pode ser sobrescrita via .env
+      - API_URL=${API_URL:-http://host.docker.internal:3000/queue/ingest}
+      
+      # Arquivo de scan paths: configurável via .env
+      # IMPORTANTE: Configure SCAN_PATHS_FILE no seu .env com o caminho completo
+      # Exemplo: /home/seu_usuario/.config/brain/scan.paths
+      - SCAN_PATHS_FILE=${SCAN_PATHS_FILE}
+      
+      # Home do usuário (para expansão do ~ no caminho acima)
+      # Configure USER_HOME no .env se necessário
+      - USER_HOME=${USER_HOME:-/root}
     volumes:
-      - /home/nisio:/home/nisio:ro
-      - /home/nisio/.config/brain/scan.paths:/home/nisio/.config/brain/scan.paths:ro
+      # Mapeia o diretório base onde estão os caminhos de scan
+      # IMPORTANTE: Configure SCAN_PATHS_MOUNT no seu .env
+      # Exemplo: /home/seu_usuario
+      - ${SCAN_PATHS_MOUNT}:${SCAN_PATHS_MOUNT}:ro
     depends_on:
-      - api
+      - queue
+      - db
+    # Não depende da API rodando no Docker - pode usar API local
 
+  # 3. O Banco de Vetores (ChromaDB)
   db:
     image: chromadb/chroma
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${CHROMA_PORT:-8000}:8000"
     volumes:
       - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # 4. A Fila de Trabalhos (Redis)
   queue:
     image: redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   chroma_data:

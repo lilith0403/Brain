@@ -14,5 +14,7 @@ brain-api/yarn-error.log*
 brain-watcher/brain-watcher
 brain-cli/brain
 
+brain-watcher/.env
+
 .DS_Store
 *.log

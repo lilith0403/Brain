@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/joho/godotenv" // Importa o godotenv
 )
 
 // O "DTO" que a API NestJS espera
@@ -44,12 +45,12 @@ var blocklistSubDirs = []string{
 	"build",
 	"dist",
 	"target",
-	"go/pkg/mod", // Bloqueia /home/nisio/go/pkg/mod
+	"go/pkg/mod",
 	".config/notion-app-enhanced",
 	".config/Cursor",
 	".config/BraveSoftware",
 	".config/discord",
-	".config*spotify",
+	".config/spotify",
 	".local/share/Steam",
 	".local/share/Trash",
 	".docker",
@@ -93,8 +94,7 @@ var whitelistFilenames = map[string]bool{
 func shouldProcess(path string, isDir bool) bool {
 	// 1. Checar se está em uma subpasta bloqueada
 	for _, blockedDir := range blocklistSubDirs {
-		// CORREÇÃO: Checa se o caminho CONTÉM a pasta bloqueada.
-		// Adicionamos "/" para evitar falsos positivos (ex: "my-node_modules-project")
+		// Checa se o caminho CONTÉM a pasta bloqueada.
 		if strings.Contains(path, "/"+blockedDir+"/") || strings.HasSuffix(path, "/"+blockedDir) {
 			return false // Está em uma pasta bloqueada
 		}
@@ -121,15 +121,17 @@ func shouldProcess(path string, isDir bool) bool {
 	return true
 }
 
-// Lê o arquivo de configuração e retorna a lista de caminhos
-func loadPathsToScan() ([]string, error) {
-	configPath := "/home/nisio/.config/brain/scan.paths"
+// Lê o arquivo de configuração (no caminho especificado) e retorna a lista de caminhos
+func loadPathsToScan(configPath string) ([]string, error) {
+	// Expande o '~/' no caminho do *arquivo de configuração* (para o .env local)
+	if strings.HasPrefix(configPath, "~/") {
+		configPath = filepath.Join(homeDir, configPath[2:])
+	}
+
 	file, err := os.Open(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("AVISO: Arquivo %s não encontrado.", configPath)
-			log.Println("Por favor, crie este arquivo e adicione os caminhos que você quer escanear.")
-			log.Println("Exemplo: /home/nisio/Repos")
+			log.Printf("AVISO: Arquivo de configuração não encontrado em: %s", configPath)
 			return []string{}, nil
 		}
 		return nil, err
@@ -141,9 +143,9 @@ func loadPathsToScan() ([]string, error) {
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" && !strings.HasPrefix(line, "#") {
-			// Resolve caminhos relativos (ex: ~/Repos)
+			// Expande '~/' nos caminhos DENTRO do arquivo
 			if strings.HasPrefix(line, "~/") {
-				line = filepath.Join("/home/nisio", line[2:])
+				line = filepath.Join(homeDir, line[2:])
 			}
 			paths = append(paths, line)
 		}
@@ -152,33 +154,53 @@ func loadPathsToScan() ([]string, error) {
 }
 
 func main() {
+	// Tenta carregar o .env local (para 'go run .')
+	err := godotenv.Load()
+	if err != nil && !os.IsNotExist(err) {
+		log.Printf("AVISO: Erro ao carregar .env local: %v", err)
+	}
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer watcher.Close()
 
-	// Salva o diretório Home globalmente
-	homeDir, err = os.UserHomeDir()
-	if err != nil {
-		log.Fatal("Erro ao encontrar o diretório home:", err)
+	// Salva o diretório Home globalmente (para expandir '~')
+	// Primeiro tenta usar USER_HOME da variável de ambiente (útil no Docker)
+	if userHome := os.Getenv("USER_HOME"); userHome != "" {
+		homeDir = userHome
+		log.Printf("Usando USER_HOME do ambiente: %s", homeDir)
+	} else {
+		// Fallback para o home do sistema
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			log.Fatal("Erro ao encontrar o diretório home:", err)
+		}
+		log.Printf("Usando home do sistema: %s", homeDir)
 	}
 
-	pathsToScan, err := loadPathsToScan()
+	// 1. Lê o *caminho* do arquivo de configuração do ambiente
+	configFile := os.Getenv("SCAN_PATHS_FILE")
+	if configFile == "" {
+		log.Fatal("ERRO: Variável de ambiente SCAN_PATHS_FILE não definida.")
+	}
+
+	// 2. Carrega os caminhos DELE
+	pathsToScan, err := loadPathsToScan(configFile)
 	if err != nil {
-		log.Fatalf("Erro ao ler o arquivo de configuração: %v", err)
+		log.Fatalf("Erro ao ler o arquivo de configuração (%s): %v", configFile, err)
 	}
 
 	if len(pathsToScan) == 0 {
-		log.Println("Nenhum caminho definido em ~/.config/brain/scan.paths. O scan inicial será pulado.")
+		log.Println("Nenhum caminho de scan definido. O scan inicial será pulado.")
 	} else {
-		log.Printf("Iniciando Scan Inicial (Fase 1) em %d caminhos definidos...", len(pathsToScan))
+		log.Printf("Iniciando Scan Inicial (Fase 1) em %d caminhos...", len(pathsToScan))
 	}
 
 	// Loop por CADA caminho que queremos escanear
 	for _, path := range pathsToScan {
-		// Garante que o caminho é absoluto
-		absPath, err := filepath.Abs(path)
+		absPath, err := filepath.Abs(path) // Garante que o caminho é absoluto
 		if err != nil {
 			log.Printf("ERRO: Caminho inválido %s: %v", path, err)
 			continue
@@ -194,19 +216,14 @@ func main() {
 				return err
 			}
 
-			// --- BUG 1 CORRIGIDO: LÓGICA CORRETA ---
-			// Se NÃO devemos processar, pule o arquivo/diretório
 			if !shouldProcess(walkPath, info.IsDir()) {
 				if info.IsDir() {
 					log.Printf("IGNORANDO (Scan-Dir): %s\n", walkPath)
 					return filepath.SkipDir // Pula este diretório
 				}
-				// log.Printf("IGNORANDO (Scan-File): %s\n", walkPath)
 				return nil // Apenas pula este arquivo
 			}
-			// --- FIM DA CORREÇÃO ---
 
-			// Se chegou aqui, é porque DEVE ser processado
 			if info.IsDir() {
 				err = watcher.Add(walkPath)
 				if err != nil && !os.IsPermission(err) {
@@ -236,8 +253,6 @@ func main() {
 			if !ok {
 				return
 			}
-
-			// --- BUG 2 CORRIGIDO: LÓGICA CORRETA ---
 			if shouldProcess(event.Name, false) {
 				if event.Op == fsnotify.Create || event.Op == fsnotify.Write {
 					log.Println("AÇÃO:", event.Op, event.Name)
@@ -254,7 +269,7 @@ func main() {
 	}
 }
 
-// ingestFile (Sem alterações, continua igual)
+// ingestFile cuida do debounce, leitura, FILTRO 2 e envio
 func ingestFile(filePath string) {
 	// --- Bloco de Debounce (Cooldown) ---
 	mutex.Lock()
@@ -316,13 +331,17 @@ func ingestFile(filePath string) {
 		return
 	}
 
-	apiUrl := "http://api:3000/queue/ingest"
-	resp, err := http.Post(apiUrl, "application/json", bytes.NewBuffer(jsonPayload))
+	// 5. Envie o HTTP POST para a API (lendo do .env)
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		log.Fatal("ERRO: Variável de ambiente API_URL não definida.")
+	}
+
+	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		log.Println("ERRO ao enviar para a API:", err)
 		return
 	}
-
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

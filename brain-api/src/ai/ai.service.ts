@@ -27,6 +27,11 @@ export class AiService implements OnModuleInit {
   constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
+
+    // Permite configuração flexível: no Docker usa 'db', localmente usa 'localhost'
+    const chromaHost = this.configService.get<string>('CHROMA_HOST') || 'localhost';
+    const chromaPort = this.configService.get<string>('CHROMA_PORT') || '8000';
+    const chromaUrl = `http://${chromaHost}:${chromaPort}`;
     
     const googleApiKey = this.configService.get<string>('GOOGLE_API_KEY');
     if (!googleApiKey) {
@@ -50,20 +55,25 @@ export class AiService implements OnModuleInit {
     });
 
 
-  const chromaClient = new ChromaClient({ path: 'http://db:8000' });
+// 1. Cliente temporário (para checar a coleção)
+    //    Usando 'path' (que é o que o 'ChromaClient' espera)
+    console.log(`AiService tentando se conectar ao ChromaDB em: ${chromaUrl}`);
+    const tempClient = new ChromaClient({ path: chromaUrl });
+    try {
+      await tempClient.getCollection({ name: 'brain-collection' });
+    } catch (error) {
+      console.log('Coleção não encontrada, criando...');
+      await tempClient.createCollection({
+        name: 'brain-collection',
+      });
+    }
 
-  try {
-    await chromaClient.getCollection({ name: 'brain-collection' });
-  } catch (error) {
-    await chromaClient.createCollection({
-      name: 'brain-collection',
+    // 2. VectorStore principal (para o LangChain)
+    //    Usando 'url' (que é o que o '@langchain/community/chroma' espera)
+    this.vectorStore = new Chroma(this.embeddings, {
+      url: chromaUrl,
+      collectionName: 'brain-collection',
     });
-  }
-
-  this.vectorStore = new Chroma(this.embeddings, {
-    url: 'http://db:8000',
-    collectionName: 'brain-collection',
-  });
   
   console.log('AiService inicializado com sucesso!');
 }

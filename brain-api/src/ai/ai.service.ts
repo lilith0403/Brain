@@ -94,11 +94,26 @@ export class AiService implements OnModuleInit {
 
   private createSearchTool(): DynamicTool {
     const retriever = this.vectorStore.asRetriever(300);
-    const reranker = new CohereRerank({
-      apiKey: this.configService.get<string>('COHERE_API_KEY'),
-      model: 'rerank-multilingual-v3.0',
-      topN: 3,
-    });
+    
+    // Cohere rerank é opcional - só usa se a chave estiver configurada
+    const cohereApiKey = this.configService.get<string>('COHERE_API_KEY');
+    let reranker: CohereRerank | null = null;
+    
+    if (cohereApiKey) {
+      try {
+        reranker = new CohereRerank({
+          apiKey: cohereApiKey,
+          model: 'rerank-multilingual-v3.0',
+          topN: 3,
+        });
+        console.log('[AiService] Cohere Rerank habilitado');
+      } catch (error) {
+        console.warn('[AiService] Erro ao inicializar Cohere Rerank, continuando sem rerank:', error);
+        reranker = null;
+      }
+    } else {
+      console.log('[AiService] COHERE_API_KEY não configurada, usando busca sem rerank');
+    }
 
     return new DynamicTool({
       name: 'search_files',
@@ -113,15 +128,26 @@ export class AiService implements OnModuleInit {
             return 'Nenhum documento encontrado.';
           }
 
-          const rerankedDocs = await reranker.compressDocuments(
-            initialDocs,
-            query,
-          );
-          if (rerankedDocs.length === 0) {
-            return 'Nenhum documento relevante encontrado após re-ranking.';
+          // Se tiver reranker, usa ele; senão, retorna os documentos iniciais
+          if (reranker) {
+            try {
+              const rerankedDocs = await reranker.compressDocuments(
+                initialDocs,
+                query,
+              );
+              if (rerankedDocs.length === 0) {
+                return 'Nenhum documento relevante encontrado após re-ranking.';
+              }
+              return formatDocumentsAsString(rerankedDocs);
+            } catch (rerankError) {
+              console.warn('[Tool: search_files] Erro no rerank, usando documentos iniciais:', rerankError);
+              // Em caso de erro no rerank, retorna os documentos iniciais
+              return formatDocumentsAsString(initialDocs);
+            }
+          } else {
+            // Sem rerank, retorna os top 10 documentos iniciais
+            return formatDocumentsAsString(initialDocs.slice(0, 10));
           }
-
-          return formatDocumentsAsString(rerankedDocs);
         } catch (error) {
           console.error('[Tool: search_files] Erro:', error);
           return 'Erro ao tentar buscar nos arquivos.';

@@ -1,3 +1,5 @@
+# (The contents below were not valid YAML, replaced with a valid docker-compose file start)
+
 version: '3.8'
 
 services:
@@ -36,7 +38,9 @@ services:
     environment:
       # URL da API: se rodando no Docker, usa 'api'; se local, usa host.docker.internal
       # Esta variável pode ser sobrescrita via .env
-      - API_URL=${API_URL:-http://host.docker.internal:3000/queue/ingest}
+      # Quando a API está no Docker: http://api:3000/queue/ingest
+      # Quando a API está local: http://host.docker.internal:3000/queue/ingest
+      - API_URL=${API_URL:-http://api:3000/queue/ingest}
       
       # Arquivo de scan paths: configurável via .env
       # IMPORTANTE: Configure SCAN_PATHS_FILE no seu .env com o caminho completo

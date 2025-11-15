@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Instala Python e ferramentas de build necessárias para tree-sitter
+RUN apk add --no-cache python3 make g++ build-base
+
 # Copia os arquivos de definição de dependência
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
 
@@ -22,13 +25,10 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 
-# Copia APENAS as dependências de produção (com a flag --legacy-peer-deps)
+# Copia package.json e node_modules já compilados do builder
+# Isso evita ter que recompilar dependências nativas como tree-sitter
 COPY --from=builder /app/package.json ./
-RUN \
-  if [ -f yarn.lock ]; then yarn install --production --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci --production --legacy-peer-deps; \
-  elif [ -f pnpm-lock.yaml ]; then pnpm install --production --frozen-lockfile; \
-  else echo "No lock file found, attempting npm install --production"; npm install --production --legacy-peer-deps; fi
+COPY --from=builder /app/node_modules ./node_modules
 
 # Copia os arquivos compilados da aplicação
 COPY --from=builder /app/dist ./dist

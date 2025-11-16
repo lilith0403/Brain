@@ -1,23 +1,57 @@
-# 🧠 Brain: Seu Cérebro Pessoal Self-Hosted
+<div align="center">
 
-`Brain` é um sistema de "segundo cérebro" pessoal, 100% self-hosted. Ele monitora, indexa e armazena o conteúdo de todos os seus arquivos importantes (como dotfiles, notas e código-fonte) em um banco de dados vetorial.
+# 🧠 Brain  
 
-Através de uma CLI de chat (TUI), você pode fazer perguntas em linguagem natural e obter respostas instantâneas geradas por IA, com base *exclusivamente* no seu próprio conhecimento.
+**Seu segundo cérebro pessoal, 100% self‑hosted, conectado ao seu ambiente de desenvolvimento.**
 
-### ✨ Funcionalidades Principais
+`Go` • `NestJS` • `Docker` • `Redis` • `ChromaDB` • `RAG` • `Google Gemini`
 
-  * **🧠 Cérebro (API):** Uma API robusta em **NestJS** que gerencia a ingestão, o RAG e a comunicação com a IA.
-  * **👂 Ouvidos (Watcher):** Um serviço leve em **Go** que monitora ativamente seus arquivos (`~/.config`, `~/Repos`, etc.) e envia alterações para a fila.
-  * **🗣️ Boca (CLI):** Uma interface de chat (TUI) "bonita" em **Go (Bubble Tea)** para fazer perguntas ao seu cérebro de qualquer terminal.
-  * **⚙️ Arquitetura de Fila:** Usa **Redis** e **BullMQ** para garantir que nenhuma indexação de arquivo seja perdida, mesmo que a API esteja offline ou sobrecarregada.
-  * **💾 Persistência Vetorial:** Usa **ChromaDB** para armazenar os *embeddings* (vetores) dos seus arquivos.
-  * **🐳 100% Dockerizado:** Todos os 4 serviços (API, Watcher, Redis, ChromaDB) são orquestrados com um único arquivo `docker-compose.yml`.
+</div>
 
------
+---
 
-### 🏗️ Arquitetura do Sistema
+### 🔍 O que é o Brain?
 
-Este projeto é um **Monorepo** que contém 3 serviços principais orquestrados pelo Docker Compose.
+`Brain` é um **segundo cérebro pessoal self-hosted** que transforma seus arquivos (dotfiles, configs, notas, código, projetos) em uma base de conhecimento consultável via **chat em linguagem natural**.
+
+Você faz perguntas pelo terminal, e o Brain responde usando **RAG (Retrieval-Augmented Generation)**, buscando contexto diretamente nos seus arquivos locais antes de gerar a resposta com IA — **sem depender de SaaS de terceiros para armazenamento**.
+
+> Ideal para mostrar em portfolio como um projeto de **engenharia de plataformas + IA aplicada + arquitetura distribuída**.
+
+---
+
+### ✨ Destaques Técnicos (para recrutadores)
+
+- **Arquitetura distribuída com múltiplos serviços**
+  - `brain-api` em **NestJS** (Node.js)
+  - `brain-watcher` em **Go** (monitoramento de filesystem + envio assíncrono para API)
+  - `brain-cli` em **Go + Bubble Tea** (interface TUI de chat)
+  - Infra composta por **Redis** (fila), **ChromaDB** (vetores) e **Google Gemini** (LLM)
+
+- **RAG end-to-end self-hosted**
+  - Indexação de arquivos em background, com filtros híbridos (whitelist de extensões + blocklist de diretórios)
+  - Armazenamento vetorial com **ChromaDB**
+  - Consulta contextualizada antes de chamar o modelo do Gemini
+
+- **Resiliência e escalabilidade**
+  - Uso de **BullMQ + Redis** para enfileirar ingestão de arquivos
+  - Watcher desacoplado da API, enviando via HTTP com cooldown e filtragem de conteúdo
+  - Arquitetura pensada para rodar tudo em **containers Docker** com `docker-compose`
+
+- **Experiência de desenvolvedor**
+  - TUI em Go que roda com um simples `brain` no terminal
+  - Configuração via `.env` e arquivo de `scan.paths` com expansão de `~/`
+  - Possibilidade de rodar em modo "tudo Docker" ou "API local + infraestrutura em Docker"
+
+---
+
+### 🧩 Visão Geral da Arquitetura
+
+Este repositório é um **monorepo** com 3 serviços principais, orquestrados via Docker Compose:
+
+- `brain-api/` – API em NestJS (ingestão, RAG, integração com Gemini, fila)
+- `brain-watcher/` – watcher em Go (fsnotify + filtros + HTTP client)
+- `brain-cli/` – CLI/TUI em Go (Bubble Tea) para conversar com o Brain
 
 ```mermaid
 graph TD
@@ -28,111 +62,139 @@ graph TD
 
     subgraph "Docker Compose (Serviços)"
         API("brain-api [NestJS]")
-        Queue("Fila [Redis]")
+        Queue("Fila [Redis/BullMQ]")
         DB("Vector DB [ChromaDB]")
     end
 
     subgraph "Cloud"
-        Gemini("Gemini API")
+        Gemini("Google Gemini API")
     end
 
-    Watcher -- "1. Envia arquivos p/ fila (HTTP)" --> API
-    API -- "2. Adiciona Job" --> Queue
-    API -- "3. Processa Fila (1 por 1)" --> Queue
-    API -- "4. Deleta/Adiciona Vetores" --> DB
-    API -- "5. Gera Embeddings" --> Gemini
+    Watcher -- "1. Envia arquivos p/ ingestão (HTTP)" --> API
+    API -- "2. Cria jobs na fila" --> Queue
+    API -- "3. Consome fila e processa arquivos" --> Queue
+    API -- "4. Atualiza vetores" --> DB
+    API -- "5. Gera embeddings / respostas" --> Gemini
 
     CLI -- "A. Pergunta (HTTP)" --> API
-    API -- "B. Busca Contexto (RAG)" --> DB
-    API -- "C. Gera Resposta" --> Gemini
-    API -- "D. Retorna Resposta" --> CLI
+    API -- "B. Busca contexto (RAG)" --> DB
+    API -- "C. Chama Gemini" --> Gemini
+    API -- "D. Retorna resposta" --> CLI
 ```
 
------
+---
 
-### 🚀 Como Rodar
+### ✅ Funcionalidades atuais
+
+- **Indexação inteligente de arquivos locais**
+  - Scan inicial dos caminhos configurados (dotfiles, repositórios, documentos etc.)
+  - Filtro de diretórios ruidosos (`node_modules`, `.git`, `dist`, `build`, caches, Steam, Discord, etc.)
+  - Whitelist de extensões de texto e arquivos de configuração comuns (`.go`, `.ts`, `.js`, `.json`, `.md`, `.conf`, `.sh`, etc.)
+  - Limite de tamanho por arquivo para evitar ingestão de arquivos gigantes
+
+- **Monitoramento contínuo (Watcher em Go)**
+  - Usa `fsnotify` para receber eventos do sistema de arquivos
+  - Aplica **cooldown** por arquivo para evitar spam em mudanças rápidas
+  - lê conteúdo, aplica filtro de MIME type (`text/*`) e envia para a API
+
+- **Chat em linguagem natural pelo terminal**
+  - Comando único `brain` abre a interface TUI
+  - Histórico de mensagens na sessão
+  - Usa a API do cérebro para buscar contexto e responder com Gemini
+
+- **Infraestrutura containerizada**
+  - `docker-compose.yml` sobe API, watcher, Redis, ChromaDB
+  - Permite rodar tudo em modo "produção dev" ou apenas infra + API local em modo dev
+
+---
+
+### 🧱 Stack & Skills demonstradas
+
+- **Linguagens:** Go, TypeScript (NestJS), JavaScript/TS para backend
+- **Infra & DevOps:** Docker, Docker Compose, Redis, ChromaDB
+- **Arquitetura de Software:** RAG, filas assíncronas, serviços desacoplados, watch de filesystem
+- **Developer Experience:** CLI/TUI amigável, configuração via `.env`, monorepo organizado
+
+---
+
+### 🚀 Como rodar o projeto
 
 #### Pré-requisitos
 
-  * [Docker](https://www.docker.com/) e [Docker Compose](https://docs.docker.com/compose/)
-  * [Node.js e npm](https://nodejs.org/) (para desenvolvimento local da API)
-  * [Go](https://go.dev/) (para compilar a CLI)
-  * Uma Chave de API do [Google AI Studio](https://aistudio.google.com/app/apikey)
+- [Docker](https://www.docker.com/) e [Docker Compose](https://docs.docker.com/compose/)
+- [Node.js e npm](https://nodejs.org/) (se quiser desenvolver a API localmente)
+- [Go](https://go.dev/) (para compilar a CLI)
+- Uma chave de API do [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-#### 1\. Configuração
+#### 1. Clonar o repositório
 
-1.  **Clone o repositório:**
+```bash
+git clone https://github.com/seu-usuario/Brain.git
+cd Brain
+```
 
-    ```bash
-    git clone https://github.com/seu-usuario/Brain.git
-    cd Brain
-    ```
+#### 2. Configurar variáveis de ambiente
 
-2.  **Configure o arquivo `.env`:**
-    
-    Copie o arquivo de exemplo e edite com suas configurações:
+Copie o arquivo de exemplo e ajuste com seus valores:
 
-    ```bash
-    cp env.example .env
-    nano .env  # ou use seu editor preferido
-    ```
+```bash
+cp env.example .env
+nano .env  # ou seu editor preferido
+```
 
-    Configure as variáveis obrigatórias:
+Configure pelo menos:
 
-    ```ini
-    # .env
-    
-    # Chave da API do Google Gemini (obrigatório)
-    GOOGLE_API_KEY=AIzaSy... (sua chave real)
-    
-    # Caminho para o arquivo de scan paths (obrigatório)
-    # Use caminho ABSOLUTO, não ~/
-    SCAN_PATHS_FILE=/home/seu_usuario/.config/brain/scan.paths
-    
-    # Caminho base para montar no Docker (obrigatório)
-    # Geralmente seu diretório home
-    SCAN_PATHS_MOUNT=/home/seu_usuario
-    
-    # URL da API (opcional, padrão funciona para desenvolvimento local)
-    API_URL=http://host.docker.internal:3000/queue/ingest
-    ```
+```ini
+# .env
 
-    **⚠️ Importante:** Use sempre caminhos **absolutos** no `.env`, não use `~/`.
+# Chave da API do Google Gemini (obrigatório)
+GOOGLE_API_KEY=AIzaSy... (sua chave real)
 
-3.  **Crie seu arquivo de scan paths:**
-    
-    O *watcher* só indexará os arquivos e pastas que você listar neste arquivo. Crie o arquivo definido em `SCAN_PATHS_FILE`:
+# Caminho para o arquivo de scan paths (obrigatório)
+# Use caminho ABSOLUTO, não ~/
+SCAN_PATHS_FILE=/home/seu_usuario/.config/brain/scan.paths
 
-    ```bash
-    mkdir -p ~/.config/brain
-    nano ~/.config/brain/scan.paths  # ou use o caminho que você configurou no .env
-    ```
+# Caminho base para montar no Docker (obrigatório)
+SCAN_PATHS_MOUNT=/home/seu_usuario
 
-    Adicione os caminhos que você quer indexar (exemplo):
+# URL da API usada pelo watcher (padrão recomendado para Docker local)
+API_URL=http://host.docker.internal:3000/queue/ingest
+```
 
-    ```ini
-    # ~/.config/brain/scan.paths
-    
-    # Dentro deste arquivo, você PODE usar ~/ que será expandido automaticamente
-    
-    # Meus dotfiles
-    ~/.config/hypr
-    ~/.config/waybar
-    ~/.config/kitty/kitty.conf
-    ~/.zshrc
+> **Importante:** use sempre caminhos **absolutos** no `.env` (não use `~/`).
 
-    # Meus repositórios
-    ~/Repos
-    
-    # Ou use caminhos absolutos
-    /home/seu_usuario/Documents
-    ```
+#### 3. Definir os caminhos que o Brain deve conhecer
 
-#### 2\. Iniciando os Serviços
+O watcher só indexa o que você explicitamente configura no arquivo apontado por `SCAN_PATHS_FILE`.
 
-**Opção A: Tudo no Docker (Produção/Simples)**
+```bash
+mkdir -p ~/.config/brain
+nano ~/.config/brain/scan.paths
+```
 
-Com o Docker Desktop rodando, suba todos os serviços em segundo plano:
+Exemplo de conteúdo:
+
+```ini
+# ~/.config/brain/scan.paths
+
+# Dentro deste arquivo você PODE usar ~/ (será expandido automaticamente)
+
+# Meus dotfiles
+~/.config/hypr
+~/.config/waybar
+~/.config/kitty/kitty.conf
+~/.zshrc
+
+# Meus repositórios
+~/Repos
+
+# Caminhos absolutos adicionais
+/home/seu_usuario/Documents
+```
+
+#### 4. Subir os serviços
+
+**Opção A – Tudo via Docker (mais simples)**
 
 ```bash
 docker compose up -d --build
@@ -140,13 +202,11 @@ docker compose up -d --build
 
 Isso irá:
 
-1.  Construir as imagens da `brain-api` e `brain-watcher`.
-2.  Iniciar os 4 containers (`api`, `watcher`, `db`, `queue`).
-3.  O `watcher` iniciará o **"Scan Inicial (Fase 1)"**.
+1. Construir as imagens de `brain-api` e `brain-watcher`
+2. Subir os 4 containers (`api`, `watcher`, `db`, `queue`)
+3. Iniciar o **Scan Inicial (Fase 1)** em todos os caminhos definidos
 
-**Opção B: Desenvolvimento Local (API local + outros no Docker)**
-
-Para desenvolvimento, você pode rodar a API localmente e os outros serviços no Docker:
+**Opção B – Desenvolvimento da API localmente**
 
 ```bash
 # Suba apenas os serviços de infraestrutura
@@ -158,13 +218,11 @@ npm install
 npm run start:dev
 ```
 
-Isso permite hot-reload e debug mais fácil da API.
+Assim você tem **hot-reload** da API, mantendo watcher, Redis e ChromaDB em containers.
 
-📖 **Para mais detalhes sobre desenvolvimento local, veja [DEVELOPMENT.md](./DEVELOPMENT.md)**
+Para mais detalhes de desenvolvimento, consulte `DEVELOPMENT.md` (quando estiver disponível).
 
----
-
-**Acompanhar os logs:**
+#### 5. Acompanhar logs
 
 ```bash
 # Logs de todos os serviços
@@ -177,66 +235,61 @@ docker compose logs -f api
 docker compose logs -f watcher
 ```
 
-*(**Nota:** O primeiro scan pode levar vários minutos, pois a fila está processando seus arquivos (um por um) de forma segura.)*
+> O primeiro scan pode levar alguns minutos, dependendo da quantidade de arquivos.
 
-#### 3\. Instalando a CLI
+---
 
-Para usar o comando `brain` de qualquer lugar do seu sistema:
+### 💬 Usando o Brain no dia a dia
 
-```bash
-cd brain-cli
-go install .
-cd ..
-```
-
-*(Isso compila a CLI e a move para a sua pasta `~/go/bin/`).*
-
------
-
-### 💬 Como Usar
-
-Assim que o "Scan Inicial" estiver concluído, você pode começar a conversar com seu cérebro.
-
-Basta rodar o comando em qualquer terminal:
+Depois que o scan inicial terminar, você já pode conversar com seu segundo cérebro:
 
 ```bash
 brain
 ```
 
-Isso abrirá a interface de chat (TUI). Digite sua pergunta e pressione `Enter`. Para sair, pressione `Ctrl+C`.
+Isso abre a interface TUI. Digite sua pergunta, pressione `Enter`. Para sair, `Ctrl+C`.
 
-**Exemplos de Perguntas:**
+**Exemplos de perguntas reais:**
 
-  * `Qual a fonte que eu uso no kitty.conf?`
-  * `Qual o atalho de teclado para o terminal no meu hyprland.conf?`
-  * `Me explique o que o projeto 'backend.fork' faz.`
-  * `Qual é o meu alias 'll' no .zshrc?`
+- `Qual a fonte que eu uso no kitty.conf?`
+- `Qual o atalho de teclado para o terminal no meu hyprland.conf?`
+- `Me explique o que o projeto 'backend.fork' faz.`
+- `Qual é o meu alias 'll' no .zshrc?`
 
------
+---
 
-### 🔧 Desenvolvimento
+### 🔧 Desenvolvimento & próximos passos
 
-Para desenvolvedores que querem modificar o código:
+Se você quiser evoluir o Brain (ou mostrar ideias em entrevistas), alguns caminhos interessantes:
 
-📖 **Veja o guia completo em [DEVELOPMENT.md](./DEVELOPMENT.md)**
+- **Melhorar a experiência de chat na CLI**
+  - histórico persistente
+  - múltiplos perfis de cérebro (work, pessoal, estudos)
+- **Adicionar autenticação / multiusuário na API**
+- **Suporte a outros provedores de LLM**
+  - OpenAI, Claude, etc.
+- **Dash de observabilidade**
+  - métricas de ingestão, latência de resposta, tamanho do índice, etc.
 
-**Resumo rápido:**
-- Configure o `.env` com suas variáveis de ambiente
-- Rode apenas os serviços necessários: `docker compose up -d db queue watcher`
-- Desenvolva a API localmente: `cd brain-api && npm run start:dev`
-- A API se conecta automaticamente aos serviços no Docker
+---
 
-### ⚙️ Variáveis de Ambiente
+### ⚙️ Variáveis de ambiente (resumo)
 
-Principais variáveis que você pode configurar no `.env`:
+Principais variáveis configuráveis no `.env`:
 
-| Variável | Descrição | Obrigatório | Padrão |
-|----------|-----------|-------------|--------|
-| `GOOGLE_API_KEY` | Chave da API do Google Gemini | ✅ Sim | - |
-| `SCAN_PATHS_FILE` | Caminho absoluto para o arquivo de scan paths | ✅ Sim | - |
-| `SCAN_PATHS_MOUNT` | Caminho absoluto base para montar no Docker | ✅ Sim | - |
-| `API_URL` | URL da API para o watcher | ❌ Não | `http://host.docker.internal:3000/queue/ingest` |
-| `REDIS_HOST` | Host do Redis (quando API local) | ❌ Não | `localhost` |
-| `CHROMA_HOST` | Host do ChromaDB (quando API local) | ❌ Não | `localhost` |
+| Variável         | Descrição                                      | Obrigatório | Padrão                                           |
+|------------------|------------------------------------------------|-------------|--------------------------------------------------|
+| `GOOGLE_API_KEY` | Chave da API do Google Gemini                  | ✅ Sim      | -                                                |
+| `SCAN_PATHS_FILE`| Caminho absoluto para o arquivo de scan paths  | ✅ Sim      | -                                                |
+| `SCAN_PATHS_MOUNT`| Caminho base montado no Docker                | ✅ Sim      | -                                                |
+| `API_URL`        | URL da API usada pelo watcher                  | ❌ Não      | `http://host.docker.internal:3000/queue/ingest` |
+| `REDIS_HOST`     | Host do Redis (quando API local)               | ❌ Não      | `localhost`                                      |
+| `CHROMA_HOST`    | Host do ChromaDB (quando API local)            | ❌ Não      | `localhost`                                      |
 
-Veja o arquivo `env.example` para todas as opções disponíveis.
+Veja também o arquivo `env.example` para a lista completa.
+
+---
+
+### 📜 Licença
+
+Este projeto está sob a licença MIT. Veja `LICENSE` para mais detalhes.

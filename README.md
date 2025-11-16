@@ -28,6 +28,23 @@ Você faz perguntas pelo terminal, e o Brain responde usando **RAG (Retrieval-Au
   - `brain-cli` em **Go + Bubble Tea** (interface TUI de chat)
   - Infra composta por **Redis** (fila), **ChromaDB** (vetores) e **Google Gemini** (LLM)
 
+- **Agente ReAct orquestrando ferramentas**
+  - Usa **LangChain Agents (ReAct)** com um tool de busca (`search_files`) conectado ao vector store
+  - O agente decide quando consultar seus arquivos e quando raciocinar “só na cabeça”
+  - Tratamento de erros do output do LLM para extrair a **“Final Answer”** mesmo quando o modelo foge do formato esperado
+
+- **Re-ranking semântico opcional**
+  - Integração com **Cohere Rerank** (`rerank-multilingual-v3.0`) quando `COHERE_API_KEY` está configurada
+  - Primeiro faz uma busca densa no Chroma, depois aplica **re-ranking** para ordenar os documentos mais relevantes
+  - Fallback automático para a busca padrão caso o reranker não esteja disponível ou falhe
+
+- **Chunking adaptativo por tipo de arquivo**
+  - Detecção de linguagem a partir da extensão (`.go`, `.ts`, `.py`, `.md`, `.html`, etc.)
+  - **Markdown**: usa `MarkdownTextSplitter` preservando títulos, listas e blocos de código
+  - **Código**: usa `RecursiveCharacterTextSplitter.fromLanguage` com separadores específicos de linguagem, chunk maior e overlap maior para preservar funções/classes
+  - **Texto / configs genéricas**: splitter recursivo com hierarquia de separadores (`\n\n`, `\n`, frases, palavras) e parâmetros otimizados para textos planos
+  - Estratégia “delete‑then‑add” por arquivo, garantindo que a coleção vetorial esteja sempre alinhada à última versão do arquivo
+
 - **RAG end-to-end self-hosted**
   - Indexação de arquivos em background, com filtros híbridos (whitelist de extensões + blocklist de diretórios)
   - Armazenamento vetorial com **ChromaDB**

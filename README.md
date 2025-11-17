@@ -20,7 +20,7 @@ Você faz perguntas pelo terminal, e o Brain responde usando **RAG (Retrieval-Au
 
 ---
 
-### ✨ Destaques Técnicos (para recrutadores)
+### ✨ Destaques Técnicos
 
 - **Arquitetura distribuída com múltiplos serviços**
   - `brain-api` em **NestJS** (Node.js)

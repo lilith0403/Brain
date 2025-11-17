@@ -14,9 +14,7 @@
 
 `Brain` é um **segundo cérebro pessoal self-hosted** que transforma seus arquivos (dotfiles, configs, notas, código, projetos) em uma base de conhecimento consultável via **chat em linguagem natural**.
 
-Você faz perguntas pelo terminal, e o Brain responde usando **RAG (Retrieval-Augmented Generation)**, buscando contexto diretamente nos seus arquivos locais antes de gerar a resposta com IA — **sem depender de SaaS de terceiros para armazenamento**.
-
-> Ideal para mostrar em portfolio como um projeto de **engenharia de plataformas + IA aplicada + arquitetura distribuída**.
+Você faz perguntas pelo terminal, e o Brain responde usando **RAG (Retrieval-Augmented Generation)**, buscando contexto diretamente nos seus arquivos locais antes de gerar a resposta com IA — **sem depender de SaaS de terceiros para armazenamento**.
 
 ---
 

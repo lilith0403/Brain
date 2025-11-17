@@ -267,8 +267,7 @@ Isso abre a interface TUI. Digite sua pergunta, pressione `Enter`. Para sair, `C
 **Exemplos de perguntas reais:**
 
 - `Qual a fonte que eu uso no kitty.conf?`
-- `Qual o atalho de teclado para o terminal no meu hyprland.conf?`
-- `Me explique o que o projeto 'backend.fork' faz.`
+- `Qual o atalho de teclado para o terminal no meu hyprland.conf?`
 - `Qual é o meu alias 'll' no .zshrc?`
 
 ---
